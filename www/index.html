@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Coach</title>
+	<script src="/js/lib/jquery.js"></script>
+	<script src="/js/lib/underscore.js"></script>
+	<script src="/js/lib/backbone.js"></script>
+</head>
+<body>
+	<div id="content">
+		<ul id="sessions"></ul>	
+	</div>
+	<script id="session-tmpl" type="text/template">
+		<div>Session: <%= title %> <%= date %> <button class="destroy"></button></div>
+	</script>
+	<script>
+		var app = {};
+		
+		app.Session = Backbone.Model.extend({
+			defaults: {
+				title: 'n/a',
+				date:  'n/a'
+			}
+		});
+
+		var Schedule = Backbone.Collection.extend({
+			model: app.Session,
+			url: '/schedule'
+		});
+		app.Schedule = new Schedule();
+
+		app.SessionView = Backbone.View.extend({
+			tagName: 'li',
+			className: 'session',
+			tmpl: _.template($('#session-tmpl').html()),
+
+			events: {
+				'click button.destroy': 'remove'
+			},
+
+			initialize: function() {
+				this.listenTo(this.model, 'change', this.render);
+			},
+			render: function() {
+				this.$el.html(this.tmpl(this.model.toJSON()));
+				return this;
+			},
+			remove: function() {
+				var res = this.model.destroy({
+					wait: true,
+					success: function() {
+						console.log('Session deleted');
+					}
+				});
+				if (!res) {
+					console.log('Session NOT persisted yet, threfore not deleted from server!');
+				}
+			}
+		});
+
+		app.ScheduleView = Backbone.View.extend({
+			el: '#content',
+
+			initialize: function() {
+				this.listenTo(app.Schedule, 'add', this.addSession);
+				this.listenTo(app.Schedule, 'reset', this.render);
+				this.listenTo(app.Schedule, 'destroy', this.render);
+				this.listenTo(app.Schedule, 'sync', function(){console.log("Model synced")});
+				app.Schedule.fetch();
+			},
+			render: function() {
+				console.log("Rendering schedule ["+app.Schedule.size()+"]")
+				this.$('#sessions').html('');
+				app.Schedule.each(this.addSession, this);
+				return this;
+			},
+			addSession: function(session) {
+				var sessionView = new app.SessionView({model: session});
+				this.$('#sessions').append(sessionView.render().el);
+			}
+		});
+
+		new app.ScheduleView();
+	</script>
+</body>
+</html>
