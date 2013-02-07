@@ -48,8 +48,11 @@
 			remove: function() {
 				var res = this.model.destroy({
 					wait: true,
-					success: function() {
-						console.log('Session deleted');
+					success: function(model, response, options) {
+						console.log('Session #' + model.id +' deleted');
+					},
+					error: function(model, xhr, options) {
+						console.log(xhr.statusText);
 					}
 				});
 				if (!res) {
@@ -65,11 +68,12 @@
 				this.listenTo(app.Schedule, 'add', this.addSession);
 				this.listenTo(app.Schedule, 'reset', this.render);
 				this.listenTo(app.Schedule, 'destroy', this.render);
-				this.listenTo(app.Schedule, 'sync', function(){console.log("Model synced")});
+				this.listenTo(app.Schedule, 'request', function(){console.log('Request to server sent')});
+				this.listenTo(app.Schedule, 'sync', function(){console.log('Response from server received')});
 				app.Schedule.fetch();
 			},
 			render: function() {
-				console.log("Rendering schedule ["+app.Schedule.size()+"]")
+				console.log('Rendering schedule of size: ' + app.Schedule.size());
 				this.$('#sessions').html('');
 				app.Schedule.each(this.addSession, this);
 				return this;
