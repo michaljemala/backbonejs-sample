@@ -26,6 +26,7 @@ type (
 var (
 	storage  = Storage{data: make(map[int]Session)}
 	sequence = sequenceGenerator(1)
+	router   *mux.Router
 )
 
 func init() {
@@ -38,22 +39,23 @@ func init() {
 }
 
 func main() {
-	r := mux.NewRouter()
+	router = mux.NewRouter()
 
 	// Handle /schedule
-	r.HandleFunc("/schedule", ListHandler).Methods("GET")
-	r.HandleFunc("/schedule", CreateHandler).Methods("POST")
-	r.HandleFunc("/schedule/{id:[0-9]+}", GetHandler).Methods("GET")
-	r.HandleFunc("/schedule/{id:[0-9]+}", UpdateHandler).Methods("PUT")
-	r.HandleFunc("/schedule/{id:[0-9]+}", DeleteHandler).Methods("DELETE")
+	router.HandleFunc("/schedule", ListHandler).Methods("GET").Name("Schedule")
+	router.HandleFunc("/schedule", CreateHandler).Methods("POST")
+	router.HandleFunc("/schedule/{id:[0-9]+}", GetHandler).Methods("GET").Name("Session")
+	router.HandleFunc("/schedule/{id:[0-9]+}", UpdateHandler).Methods("PUT")
+	router.HandleFunc("/schedule/{id:[0-9]+}", DeleteHandler).Methods("DELETE")
 
 	// Handle resources
-	r.PathPrefix("/").Handler(http.FileServer(http.Dir("www")))
+	router.PathPrefix("/").Handler(http.FileServer(http.Dir("www")))
 
-	http.Handle("/", r)
+	http.Handle("/", router)
 	log.Fatal(http.ListenAndServe(":8080", logger(http.DefaultServeMux)))
 }
 
+// Handlers
 func ListHandler(rw http.ResponseWriter, r *http.Request) {
 	storage.RLock()
 	var keys []int
@@ -72,7 +74,6 @@ func ListHandler(rw http.ResponseWriter, r *http.Request) {
 	enc.Encode(&sessions)
 }
 
-// Handlers
 func CreateHandler(rw http.ResponseWriter, r *http.Request) {
 	var s Session
 
@@ -90,25 +91,66 @@ func CreateHandler(rw http.ResponseWriter, r *http.Request) {
 	storage.data[s.Id] = s
 	storage.Unlock()
 
-	rw.Header().Set("content-type", "application/json")
+	rw.Header().Set("Content-type", "application/json")
+	if url, err := location(r, "Session", "id", strconv.Itoa(s.Id)); err == nil {
+		rw.Header().Set("Location", url)
+	}
 	rw.WriteHeader(http.StatusCreated)
 	enc := json.NewEncoder(rw)
 	enc.Encode(&s)
 }
 
 func GetHandler(rw http.ResponseWriter, r *http.Request) {
-	rw.WriteHeader(http.StatusInternalServerError)
+	id_str := mux.Vars(r)["id"]
+	id, err := strconv.ParseInt(id_str, 0, 0)
+	if err != nil {
+		rw.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	var s Session
+	var found bool
+
+	storage.RLock()
+	s, found = storage.data[int(id)]
+	storage.RUnlock()
+
+	if !found {
+		rw.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	rw.Header().Set("content-type", "application/json")
+	rw.WriteHeader(http.StatusCreated)
+	enc := json.NewEncoder(rw)
+	enc.Encode(&s)
 }
 
 func UpdateHandler(rw http.ResponseWriter, r *http.Request) {
-	rw.WriteHeader(http.StatusInternalServerError)
+	var s Session
+
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&s); err != nil {
+		data, _ := json.Marshal(err)
+		rw.WriteHeader(http.StatusBadRequest)
+		rw.Write(data)
+		return
+	}
+
+	storage.Lock()
+	storage.data[s.Id] = s
+	storage.Unlock()
+
+	rw.WriteHeader(http.StatusOK)
+	enc := json.NewEncoder(rw)
+	enc.Encode(&s)
 }
 
 func DeleteHandler(rw http.ResponseWriter, r *http.Request) {
 	id_str := mux.Vars(r)["id"]
 	id, err := strconv.ParseInt(id_str, 0, 0)
 	if err != nil {
-		rw.WriteHeader(http.StatusInternalServerError)
+		rw.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
@@ -128,6 +170,23 @@ func sequenceGenerator(start int) <-chan int {
 		}
 	}(start)
 	return c
+}
+
+// See docs in http.Request.Redirect method on how to generate Location Header
+func location(req *http.Request, route string, params ...string) (string, error) {
+	path, err := router.Get(route).URL(params...)
+	if err != nil {
+		return "", err
+	}
+
+	scheme := "http"
+	if req.TLS != nil {
+		scheme += "s"
+	}
+	host := req.Host
+	url := scheme + "://" + host + path.String()
+
+	return url, nil
 }
 
 func logger(h http.Handler) http.Handler {
